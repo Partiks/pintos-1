@@ -1,4 +1,5 @@
 #include "threads/thread.h"
+#include "devices/timer.h"
 #include <debug.h>
 #include <stddef.h>
 #include <random.h>
@@ -27,6 +28,9 @@ static struct list ready_list;
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
+
+/*List of all threads that are sleeping sorted based on wakeup time */
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -92,7 +96,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-
+  list_init(&sleep_list);
+  
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -137,6 +142,9 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+
+  /* Wakeup any sleeping threads that are waiting for the timer. */
+  threads_wakeup();
 }
 
 /* Prints thread statistics. */
@@ -582,3 +590,52 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+
+/* Thread comparator function to compare ticks for sorting. */
+bool
+thread_ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct thread *thread_a = list_entry(a, struct thread, elem);
+  struct thread *thread_b = list_entry(b, struct thread, elem);
+  
+  return thread_a->wakeup_time < thread_b->wakeup_time;
+}
+
+/* Puts the thread in the sorted sleeping list. */
+void
+thread_sleep_until (int64_t ticks)
+{
+  struct thread *curr = thread_current();
+  enum intr_level old_level;
+
+  old_level = intr_disable();
+  curr->wakeup_time = ticks;
+  list_insert_ordered(&sleep_list, &curr->elem, thread_ticks_compare, NULL);
+  thread_block();
+  intr_set_level(old_level);
+}
+
+/* Wake up sleeping threads. */
+void
+threads_wakeup (void)
+{
+  int64_t ticks = timer_ticks();
+
+  while(!list_empty(&sleep_list))
+    {
+      struct list_elem *it = list_front(&sleep_list);
+      struct thread *t = list_entry(it, struct thread, elem);
+
+      /* sleep_list is sorted based on their wakeup times, 
+	 so if the first thread has higher wakeup time then others also have higher wakeup times. */
+      if(t->wakeup_time > ticks)
+	{
+	  return;
+	}
+
+      /* Pop the thread from the sleep_list before calling unblock. */
+      list_pop_front(&sleep_list);
+      thread_unblock(t);
+    }
+}
