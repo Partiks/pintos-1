@@ -121,9 +121,7 @@ thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-  printf("thread_start\n");
   thread_create ("idle", PRI_MIN, idle, &idle_started);
-  printf("created idle\n");
   /* Start preemptive thread scheduling. */
   intr_enable ();
 
@@ -219,9 +217,9 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
- old_level = intr_disable();
- test_priority();
- intr_set_level(old_level);
+  old_level = intr_disable();
+  test_priority();
+  intr_set_level(old_level);
 
   return tid;
 }
@@ -365,11 +363,21 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  enum intr_level old_level;
+  if(thread_mlfqs)
+    return;
   
-  thread_current ()->priority = new_priority;
+  enum intr_level old_level = intr_disable();
+  struct thread *curr = running_thread();
+  curr->original_priority = new_priority;
+  int old_priority = curr->priority;
+  priority_refresh();
 
-  old_level = intr_disable();
+  // In case of priority inversion if the new priority is greater then donate it.
+  if(old_priority < curr->priority)
+    {
+      priority_donate();
+    }
+
   test_priority();
   intr_set_level(old_level);
 }
@@ -503,6 +511,11 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+
+  /* Initialization for priority donation. */
+  t->original_priority = priority;
+  t->lock_to_acquire = NULL;
+  list_init(&t->donations);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -657,8 +670,9 @@ threads_wakeup(void)
       struct list_elem *it = list_front(&sleep_list);
       struct thread *t = list_entry(it, struct thread, elem);
 
-      /* sleep_list is sorted based on their wakeup times, 
-	 so if the first thread has higher wakeup time then others also have higher wakeup times. */
+   /* sleep_list is sorted based on their wakeup times, 
+      so if the first thread has higher wakeup time then
+      others also have higher wakeup times. */
       if(t->wakeup_time > ticks)
 	{
 	  return;
@@ -689,8 +703,78 @@ test_priority(void)
 
   struct thread *curr = running_thread();
   struct thread *front = list_entry(list_front(&ready_list), struct thread, elem);
+
+  if(intr_context())
+    {
+      thread_ticks++;
+      if(curr->priority < front->priority || (thread_ticks >= TIME_SLICE && curr->priority == front->priority))
+	{
+	  intr_yield_on_return();
+	}
+      return;
+    }
+  
   if(curr->priority < front->priority)
     {
       thread_yield();
+    }
+}
+
+/* Function to handle priority donation. */
+void
+priority_donate(void)
+{
+  struct thread *curr = running_thread();
+  struct lock *lock = curr->lock_to_acquire;
+
+  while(lock && lock->holder)
+    {
+      struct thread *t = lock->holder;
+      if(curr->priority <= t->priority)
+	{
+	  return;
+	}
+
+      t->priority = curr->priority;
+      curr = t;
+      lock = curr->lock_to_acquire;
+    }
+}
+
+/* Remove threads from donations list. */
+void
+remove_donations(struct lock *lock)
+{
+  struct thread *curr = running_thread();
+  struct list_elem *it = list_begin(&curr->donations);
+
+  while(it->next)
+    {
+      struct thread *t = list_entry(it, struct thread, donation_elem);
+      struct list_elem *next = it->next;
+      if(t->lock_to_acquire == lock)
+	{
+	  list_remove(it);
+	}
+      it = next;
+    }
+}
+
+/* Refresh priority of thread. */
+void
+priority_refresh(void)
+{
+  struct thread *curr = running_thread();
+  curr->priority = curr->original_priority;
+  if(list_empty(&curr->donations))
+    {
+      return;
+    }
+
+  //If thread holds another lock.
+  struct thread *front = list_entry(list_front(&curr->donations), struct thread, donation_elem);
+  if(front->priority > curr->priority)
+    {
+      curr->priority = front->priority;
     }
 }

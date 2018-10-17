@@ -68,9 +68,12 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      //list_push_back (&sema->waiters, &thread_current ()->elem);
-      list_insert_ordered(&sema->waiters, &thread_current()->elem, threads_priorities_compare, NULL);
-      thread_block ();
+      if(!thread_mlfqs)
+	{
+	  priority_donate();
+	}
+      list_insert_ordered(&sema->waiters, &thread_current ()->elem, threads_priorities_compare, NULL);
+      thread_block();
     }
   sema->value--;
   intr_set_level (old_level);
@@ -116,11 +119,12 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters))
     {
+      list_sort(&sema->waiters, threads_priorities_compare, NULL);
       thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
     }
   sema->value++;
-
+  
   if(!intr_context())
     {
       test_priority();
@@ -205,8 +209,20 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable(); 
+  struct thread *curr = thread_current();
+					
+  if(!thread_mlfqs && lock->holder)
+    {
+      curr->lock_to_acquire = lock;
+      list_insert_ordered(&lock->holder->donations, &curr->donation_elem, threads_priorities_compare, NULL);
+    }
+  
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  thread_current()->lock_to_acquire = NULL; 
+  lock->holder = curr;
+
+  intr_set_level(old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -240,8 +256,17 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable(); 
   lock->holder = NULL;
+  
+  if (!thread_mlfqs)
+    {
+      remove_donations(lock);
+      priority_refresh();
+    }
+  
   sema_up (&lock->semaphore);
+  intr_set_level(old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -304,7 +329,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  //list_push_back (&cond->waiters, &waiter.elem);
+
   list_insert_ordered(&cond->waiters, &waiter.elem, semaphores_priorities_compare, NULL);
   
   lock_release (lock);
