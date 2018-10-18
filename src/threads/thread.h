@@ -103,6 +103,11 @@ struct thread
 
     
     int64_t wakeup_time;                /* Count of ticks for timer. */
+    
+    int original_priority;              /* Priority before priority donation. */
+    struct lock *lock_to_acquire;       /* Lock that the thread wants to acquire. */
+    struct list donations;              /* List to keep track of threads involved in priority donation. */
+    struct list_elem donation_elem;     /* List element for donations list. */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -142,8 +147,12 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 /* New functions. */
-bool thread_ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
 void thread_sleep_until (int64_t ticks);
-void threads_wakeup (void);
+
+bool threads_priorities_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
+void test_priority(void);
+void priority_donate(void);
+void remove_donations(struct lock *lock);
+void priority_refresh(void);
 
 #endif /* threads/thread.h */
