@@ -181,6 +181,7 @@ thread_tick (void)
 
       if(timer_ticks() % 4 == 0)
 	{
+	  /* Update priority for all threads. */
 	  struct list_elem *e = list_begin(&all_list);
 	  while(e->next)
 	    {
@@ -226,8 +227,6 @@ thread_create (const char *name, int priority,
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
   tid_t tid;
-  
-  enum intr_level old_level;
 
   ASSERT (function != NULL);
 
@@ -258,9 +257,13 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-  old_level = intr_disable();
+  static struct semaphore critical;
+  sema_init(&critical, 1);
+  sema_down(&critical);
+
   test_priority();
-  intr_set_level(old_level);
+  
+  sema_up(&critical);
 
   return tid;
 }
@@ -403,7 +406,10 @@ thread_set_priority (int new_priority)
   if(thread_mlfqs)
     return;
 
-  enum intr_level old_level = intr_disable();
+  static struct semaphore critical;
+  sema_init(&critical, 1);
+  sema_down(&critical);
+
   struct thread *curr = running_thread();
   curr->original_priority = new_priority;
   int old_priority = curr->priority;
@@ -416,7 +422,8 @@ thread_set_priority (int new_priority)
     }
 
   test_priority();
-  intr_set_level(old_level);
+
+  sema_up(&critical);
 }
 
 /* Returns the current thread's priority. */
@@ -430,7 +437,10 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  enum intr_level old_level = intr_disable();
+  static struct semaphore critical;
+  sema_init(&critical, 1);
+  sema_down(&critical);
+  
   struct thread * curr = running_thread();
   curr->nice = nice;
   mlfqs_priority_update(curr);
@@ -445,8 +455,8 @@ thread_set_nice (int nice UNUSED)
 	    thread_yield();
 	}
     }
-  
-  intr_set_level(old_level);
+
+  sema_up(&critical);
 }
 
 /* Returns the current thread's nice value. */
@@ -460,10 +470,14 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  enum intr_level old_level = intr_disable();
+  static struct semaphore critical;
+  sema_init(&critical, 1);
+  sema_down(&critical);
+  
   int load = mult_mixed(load_avg, 100);
   load = fp_to_int_round(load);
-  intr_set_level(old_level);
+
+  sema_up(&critical);
   return load;
 }
 
@@ -471,15 +485,16 @@ thread_get_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  enum intr_level old_level = intr_disable();
+  static struct semaphore critical;
+  sema_init(&critical, 1);
+  sema_down(&critical);
 
   struct thread * t = running_thread();
   int recent_cpu = mult_mixed(t->recent_cpu,100);
   recent_cpu = fp_to_int_round(recent_cpu);
 
-  intr_set_level(old_level);  
+  sema_up(&critical);
   return recent_cpu;
-
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -715,12 +730,12 @@ void
 thread_sleep_until(int64_t ticks)
 {
   struct thread *curr = running_thread();
-  enum intr_level old_level;
+  enum intr_level old_level = intr_disable();
 
-  old_level = intr_disable();
   curr->wakeup_time = ticks;
   list_insert_ordered(&sleep_list, &curr->elem, threads_ticks_compare, NULL);
   thread_block();
+
   intr_set_level(old_level);
 }
 
