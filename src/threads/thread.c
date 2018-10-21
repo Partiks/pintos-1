@@ -76,10 +76,6 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-/* New functions. */
-static bool threads_ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
-static void threads_wakeup (void);
-
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -716,7 +712,7 @@ uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
 
 /* Thread comparator function to compare ticks for sorting. */
-static bool
+bool
 threads_ticks_compare(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   struct thread *thread_a = list_entry(a, struct thread, elem);
@@ -740,7 +736,7 @@ thread_sleep_until(int64_t ticks)
 }
 
 /* Wake up sleeping threads. */
-static void
+void
 threads_wakeup(void)
 {
   int64_t ticks = timer_ticks();

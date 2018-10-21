@@ -154,6 +154,8 @@ int thread_get_load_avg (void);
 
 /* New functions. */
 void thread_sleep_until (int64_t ticks);
+bool threads_ticks_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
+void threads_wakeup (void);
 
 bool threads_priorities_compare (const struct list_elem *a, const struct list_elem *b, void *aux);
 void test_priority(void);
