@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -101,19 +102,24 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
-    
+
     int64_t wakeup_time;                /* Count of ticks for timer. */
     
     int original_priority;              /* Priority before priority donation. */
     struct lock *lock_to_acquire;       /* Lock that the thread wants to acquire. */
     struct list donations;              /* List to keep track of threads involved in priority donation. */
     struct list_elem donation_elem;     /* List element for donations list. */
+
+    int nice;                           /* Nice value of thread. */
+    int recent_cpu;                     /* recent_cpu value of thread. */
   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+int load_avg;
 
 void thread_init (void);
 void thread_start (void);
@@ -154,5 +160,8 @@ void test_priority(void);
 void priority_donate(void);
 void remove_donations(struct lock *lock);
 void priority_refresh(void);
+
+void thread_set_load_avg(void);
+void mlfqs_priority_update(struct thread *t);
 
 #endif /* threads/thread.h */
